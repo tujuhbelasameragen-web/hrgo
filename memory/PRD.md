@@ -2,13 +2,13 @@
 ## Product Requirements Document
 
 ### Original Problem Statement
-Membangun sistem HR bertahap dari sederhana hingga powerful, dimulai dari Fase 1 (Foundation MVP) dengan arsitektur modular yang tidak mengganggu fitur yang sudah berjalan.
+Membangun sistem HR bertahap dari sederhana hingga powerful, dengan arsitektur modular yang tidak mengganggu fitur yang sudah berjalan.
 
 ### User Personas
 1. **Super Admin** - Full access ke semua fitur sistem
-2. **HR Manager** - Kelola karyawan, departemen, posisi
+2. **HR Manager** - Kelola karyawan, departemen, posisi, lihat absensi semua
 3. **Manager** - Lihat data tim dan karyawan
-4. **Employee** - Lihat profil sendiri dan self-service
+4. **Employee** - Absensi, lihat profil sendiri, self-service
 
 ### Core Requirements (Static)
 - Multi-role authentication (JWT)
@@ -16,6 +16,7 @@ Membangun sistem HR bertahap dari sederhana hingga powerful, dimulai dari Fase 1
 - Department & Position management
 - Dashboard dengan statistik real-time
 - Employee self-service
+- Smart Attendance dengan geo + face
 
 ---
 
@@ -42,37 +43,64 @@ Membangun sistem HR bertahap dari sederhana hingga powerful, dimulai dari Fase 1
 - Profile page
 - Responsive sidebar navigation
 
-**Tech Stack:**
-- FastAPI + Motor (async MongoDB)
-- React + Tailwind CSS + Shadcn UI
-- JWT Authentication
+---
+
+### ✅ Fase 2: Smart Attendance (Completed - Jan 2025)
+**Backend:**
+- Attendance clock in/out API
+- Geo-fence validation (radius 100m)
+- Office location: -6.161777, 106.875199
+- Attendance history & stats API
+- Face registration API (128-dim descriptor)
+- Support WFO/WFH/Client Visit modes
+- Late detection (toleransi 15 menit)
+
+**Frontend:**
+- Attendance page dengan Clock In/Out
+- Mode selection (WFO, WFH, Client Visit)
+- Camera integration untuk selfie
+- Geolocation capture
+- Attendance History dengan statistik
+- Face Registration page (face-api.js)
+- Updated sidebar dengan menu absensi
+
+**Tech Stack Additions:**
+- face-api.js (@vladmandic/face-api)
+- TensorFlow.js models untuk face recognition
+- Geolocation API
+- Camera/MediaDevices API
 
 ---
 
 ## Prioritized Backlog
 
-### P0 (Next Phase - Fase 2)
-- [ ] PWA Mobile untuk absensi
-- [ ] Face Recognition integration
-- [ ] Geo-fence location validation
-- [ ] Clock in/out dengan foto + koordinat
-- [ ] Attendance history
-
-### P1 (Fase 3)
-- [ ] Leave Management
-- [ ] Approval Workflow
-- [ ] Calendar View
+### P0 (Next Phase - Fase 3)
+- [ ] Leave Management - Request cuti/izin
+- [ ] Approval Workflow - Multi-level approval
+- [ ] Calendar View - Visualisasi jadwal & cuti
 - [ ] Overtime Management
 
-### P2 (Fase 4+)
+### P1 (Fase 4)
 - [ ] Payroll System
-- [ ] Performance Review
+- [ ] Salary Structure
+- [ ] Payslip Generation
+- [ ] Attendance-based calculation
+
+### P2 (Fase 5+)
+- [ ] Performance Review & KPI
 - [ ] Recruitment Pipeline
 - [ ] Document Management
 - [ ] Reports & Analytics
+- [ ] Multi-branch support
 
 ---
 
 ## Demo Credentials
 - **Admin:** admin@haergo.com / admin123
 - **HR:** hr@haergo.com / hr123
+
+## Office Location (Geo-fence)
+- Koordinat: -6.161777, 106.875199
+- Radius: 100 meter
+- Jam Kerja: 09:00 - 18:00
+- Toleransi Terlambat: 15 menit
