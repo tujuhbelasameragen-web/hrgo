@@ -14,6 +14,11 @@ import ProfilePage from "./pages/ProfilePage";
 import AttendancePage from "./pages/AttendancePage";
 import AttendanceHistoryPage from "./pages/AttendanceHistoryPage";
 import FaceRegistrationPage from "./pages/FaceRegistrationPage";
+import LeaveRequestPage from "./pages/LeaveRequestPage";
+import ApprovalPage from "./pages/ApprovalPage";
+import OvertimePage from "./pages/OvertimePage";
+import ShiftManagementPage from "./pages/ShiftManagementPage";
+import CalendarPage from "./pages/CalendarPage";
 import "./App.css";
 
 // Protected Route wrapper
