@@ -110,6 +110,46 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/leave"
+        element={
+          <ProtectedRoute>
+            <LeaveRequestPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/overtime"
+        element={
+          <ProtectedRoute>
+            <OvertimePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/calendar"
+        element={
+          <ProtectedRoute>
+            <CalendarPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/approvals"
+        element={
+          <ProtectedRoute allowedRoles={['super_admin', 'hr', 'manager']}>
+            <ApprovalPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/shifts"
+        element={
+          <ProtectedRoute allowedRoles={['super_admin', 'hr']}>
+            <ShiftManagementPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/employees"
         element={
           <ProtectedRoute>
