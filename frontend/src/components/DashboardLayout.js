@@ -11,7 +11,10 @@ import {
   LogOut,
   ChevronDown,
   Menu,
-  X
+  X,
+  Clock,
+  History,
+  ScanFace,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Avatar, AvatarFallback } from '../components/ui/avatar';
@@ -30,6 +33,9 @@ const Sidebar = ({ isOpen, onClose }) => {
 
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', show: true },
+    { to: '/attendance', icon: Clock, label: 'Absensi', show: true },
+    { to: '/attendance/history', icon: History, label: 'Riwayat Absensi', show: true },
+    { to: '/face-registration', icon: ScanFace, label: 'Registrasi Wajah', show: true },
     { to: '/employees', icon: Users, label: 'Karyawan', show: true },
     { to: '/departments', icon: Building2, label: 'Departemen', show: isHR },
     { to: '/positions', icon: Briefcase, label: 'Posisi', show: isHR },
