@@ -1,0 +1,148 @@
+{
+  "identity": {
+    "name": "Haergo",
+    "description": "Sistem HR modern dan minimalis untuk pengelolaan karyawan yang efisien.",
+    "language": "id-ID",
+    "tone": "Professional, Trustworthy, Clean, Modern, Minimalist",
+    "archetype": "Swiss & High-Contrast (Authority, Clarity)"
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl font-bold tracking-tight",
+      "h2": "text-3xl font-semibold tracking-tight",
+      "h3": "text-2xl font-semibold tracking-tight",
+      "h4": "text-xl font-medium tracking-tight",
+      "body_large": "text-lg leading-relaxed",
+      "body_default": "text-base leading-relaxed",
+      "body_small": "text-sm leading-normal",
+      "caption": "text-xs text-muted-foreground"
+    },
+    "usage_rules": [
+      "Use Manrope for all headings (h1-h4).",
+      "Use Inter for all body text, inputs, and data tables.",
+      "Headings must have tight tracking (-0.02em).",
+      "Use font-medium (500) for data labels to ensure readability."
+    ]
+  },
+  "colors": {
+    "primary": {
+      "name": "Professional Blue",
+      "hex": "#0F62FE",
+      "tailwind": "bg-blue-600",
+      "usage": "Primary buttons, active states, key highlights"
+    },
+    "secondary": {
+      "name": "Slate Structure",
+      "hex": "#F1F5F9",
+      "tailwind": "bg-slate-100",
+      "usage": "Backgrounds, secondary buttons"
+    },
+    "accent": {
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#3B82F6"
+    },
+    "neutral": {
+      "background": "#FFFFFF",
+      "surface": "#F8FAFC",
+      "border": "#E2E8F0",
+      "text_primary": "#0F172A",
+      "text_secondary": "#64748B"
+    },
+    "dark_mode": {
+      "background": "#020617",
+      "surface": "#0F172A",
+      "border": "#1E293B",
+      "text_primary": "#F8FAFC",
+      "text_secondary": "#94A3B8"
+    }
+  },
+  "layout": {
+    "spacing_system": "Generous spacing. Use p-6 or p-8 for cards. Gap-6 for grids.",
+    "container": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "grid_strategy": {
+      "dashboard": "grid grid-cols-1 md:grid-cols-12 gap-6",
+      "form": "grid grid-cols-1 md:grid-cols-2 gap-6"
+    },
+    "sidebar": {
+      "width": "w-64",
+      "style": "Fixed, border-r border-border bg-card"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 rounded-md font-medium transition-all shadow-sm hover:shadow-md",
+      "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80 h-10 px-4 py-2 rounded-md font-medium transition-all",
+      "ghost": "hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 rounded-md font-medium transition-all",
+      "destructive": "bg-destructive text-destructive-foreground hover:bg-destructive/90 h-10 px-4 py-2 rounded-md font-medium transition-all"
+    },
+    "cards": {
+      "style": "bg-card text-card-foreground rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow duration-200",
+      "padding": "p-6"
+    },
+    "inputs": {
+      "style": "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    "tables": {
+      "style": "w-full caption-bottom text-sm",
+      "header": "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted",
+      "row": "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": "backdrop-blur-md bg-white/70 dark:bg-black/60 border border-white/20 shadow-sm",
+    "shadows": "shadow-sm for cards, shadow-md for hover states, shadow-lg for modals",
+    "borders": "1px solid border-border. Use rounded-xl for containers, rounded-md for interactive elements.",
+    "gradients": "Subtle gradients only. No full-screen gradients. Use gradients for active borders or small accents."
+  },
+  "image_urls": {
+    "login_background": {
+      "url": "https://images.unsplash.com/photo-1665093313889-f936ed2f7cef?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBtaW5pbWFsJTIwb2ZmaWNlJTIwYWJzdHJhY3QlMjBibHVlJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NjkxMDg5MzJ8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract blue modern office background for login page"
+    },
+    "avatars": [
+      {
+        "url": "https://images.pexels.com/photos/29852895/pexels-photo-29852895.jpeg",
+        "description": "Professional headshot 1"
+      },
+      {
+        "url": "https://images.pexels.com/photos/12903122/pexels-photo-12903122.jpeg",
+        "description": "Professional headshot 2"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1589220286904-3dcef62c68ee?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBkaXZlcnNlJTIwZW1wbG95ZWUlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc2OTEwODkzMXww&ixlib=rb-4.1.0&q=85",
+        "description": "Professional headshot 3"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Implement the dashboard using the 'Bento' grid layout defined in layout.grid_strategy.",
+    "Use Shadcn UI components for all interactive elements but customize them with the classes defined in components.",
+    "Ensure all text is in Indonesian (Bahasa Indonesia).",
+    "Use the provided image URLs for avatars and backgrounds.",
+    "Implement a light/dark mode toggle in the sidebar or top bar.",
+    "Ensure all interactive elements have data-testid attributes.",
+    "Do not use generic 'lorem ipsum'. Use realistic Indonesian names and data (e.g., 'Budi Santoso', 'Departemen IT').",
+    "For the Employee Database, use a clean Data Table with search and filter capabilities.",
+    "For the Dashboard Overview, use cards to show 'Total Karyawan', 'Departemen', etc., and a chart for distribution."
+  ],
+  "universal_guidelines": [
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur) for sticky headers or overlays.",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms.",
+    "You MUST NOT center align the app container.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations.",
+    "NEVER use AI assistant Emoji characters like 🤖🧠 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Subtle grain textures or noise overlays can be used for premium feel."
+  ]
+}
