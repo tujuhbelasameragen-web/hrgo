@@ -11,6 +11,9 @@ import DepartmentsPage from "./pages/DepartmentsPage";
 import PositionsPage from "./pages/PositionsPage";
 import UsersPage from "./pages/UsersPage";
 import ProfilePage from "./pages/ProfilePage";
+import AttendancePage from "./pages/AttendancePage";
+import AttendanceHistoryPage from "./pages/AttendanceHistoryPage";
+import FaceRegistrationPage from "./pages/FaceRegistrationPage";
 import "./App.css";
 
 // Protected Route wrapper
@@ -74,6 +77,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/attendance"
+        element={
+          <ProtectedRoute>
+            <AttendancePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/attendance/history"
+        element={
+          <ProtectedRoute>
+            <AttendanceHistoryPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/face-registration"
+        element={
+          <ProtectedRoute>
+            <FaceRegistrationPage />
           </ProtectedRoute>
         }
       />
