@@ -1241,6 +1241,827 @@ async def get_face_descriptor(user: dict = Depends(get_current_user)):
     
     return {"face_descriptor": face_data['face_descriptor']}
 
+# ===================== LEAVE MANAGEMENT MODELS =====================
+
+# Leave Types Configuration
+LEAVE_TYPES = {
+    'tahunan': {
+        'nama': 'Cuti Tahunan',
+        'jatah_default': 14,
+        'potong_jatah': True,
+        'butuh_approval': True,
+        'approval_level': 'manager',  # manager only
+        'min_hari_pengajuan': 3,
+        'max_hari': 14
+    },
+    'sakit': {
+        'nama': 'Sakit',
+        'jatah_default': None,  # Unlimited with doctor's note
+        'potong_jatah': False,
+        'butuh_approval': True,
+        'approval_level': 'manager',
+        'min_hari_pengajuan': 0,
+        'max_hari': 14,
+        'butuh_lampiran': True
+    },
+    'izin': {
+        'nama': 'Izin',
+        'jatah_default': 3,
+        'potong_jatah': True,
+        'butuh_approval': True,
+        'approval_level': 'manager',
+        'min_hari_pengajuan': 1,
+        'max_hari': 3
+    },
+    'melahirkan': {
+        'nama': 'Cuti Melahirkan',
+        'jatah_default': 90,
+        'potong_jatah': False,
+        'butuh_approval': True,
+        'approval_level': 'hr',  # HR approval required
+        'min_hari_pengajuan': 14,
+        'max_hari': 90
+    },
+    'menikah': {
+        'nama': 'Cuti Menikah',
+        'jatah_default': 3,
+        'potong_jatah': False,
+        'butuh_approval': True,
+        'approval_level': 'hr',
+        'min_hari_pengajuan': 7,
+        'max_hari': 3
+    },
+    'duka': {
+        'nama': 'Cuti Duka',
+        'jatah_default': 3,
+        'potong_jatah': False,
+        'butuh_approval': True,
+        'approval_level': 'manager',
+        'min_hari_pengajuan': 0,
+        'max_hari': 7
+    }
+}
+
+class LeaveRequestCreate(BaseModel):
+    tipe_cuti: str
+    tanggal_mulai: str
+    tanggal_selesai: str
+    alasan: str
+    lampiran_url: Optional[str] = None
+
+class LeaveRequestResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    employee_id: str
+    employee_nama: Optional[str] = None
+    tipe_cuti: str
+    tipe_cuti_nama: Optional[str] = None
+    tanggal_mulai: str
+    tanggal_selesai: str
+    jumlah_hari: int
+    alasan: str
+    lampiran_url: Optional[str] = None
+    status: str  # pending, approved, rejected
+    approved_by: Optional[str] = None
+    approved_by_nama: Optional[str] = None
+    approved_at: Optional[str] = None
+    rejected_reason: Optional[str] = None
+    created_at: str
+
+class LeaveBalanceResponse(BaseModel):
+    tipe_cuti: str
+    nama: str
+    jatah: int
+    terpakai: int
+    sisa: int
+
+class LeaveApprovalAction(BaseModel):
+    action: str  # approve, reject
+    alasan: Optional[str] = None
+
+# Overtime Models
+class OvertimeRequestCreate(BaseModel):
+    tanggal: str
+    jam_mulai: str
+    jam_selesai: str
+    alasan: str
+
+class OvertimeResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    employee_id: str
+    employee_nama: Optional[str] = None
+    tanggal: str
+    jam_mulai: str
+    jam_selesai: str
+    total_jam: float
+    alasan: str
+    status: str  # pending, approved, rejected
+    approved_by: Optional[str] = None
+    approved_by_nama: Optional[str] = None
+    approved_at: Optional[str] = None
+    created_at: str
+
+# Shift Models
+class ShiftCreate(BaseModel):
+    nama: str
+    jam_masuk: str
+    jam_keluar: str
+    warna: str = '#0F62FE'
+
+class ShiftResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    nama: str
+    jam_masuk: str
+    jam_keluar: str
+    warna: str
+    created_at: str
+
+class ShiftAssignmentCreate(BaseModel):
+    employee_id: str
+    shift_id: str
+    tanggal_mulai: str
+    tanggal_selesai: Optional[str] = None
+
+class ShiftAssignmentResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    employee_id: str
+    employee_nama: Optional[str] = None
+    shift_id: str
+    shift_nama: Optional[str] = None
+    shift_jam: Optional[str] = None
+    tanggal_mulai: str
+    tanggal_selesai: Optional[str] = None
+
+def calculate_working_days(start_date: str, end_date: str) -> int:
+    """Calculate working days between two dates (excluding weekends)"""
+    start = datetime.strptime(start_date, '%Y-%m-%d')
+    end = datetime.strptime(end_date, '%Y-%m-%d')
+    days = 0
+    current = start
+    while current <= end:
+        if current.weekday() < 5:  # Mon-Fri
+            days += 1
+        current += timedelta(days=1)
+    return days
+
+# ===================== LEAVE MANAGEMENT ROUTES =====================
+
+@api_router.get("/leave/types")
+async def get_leave_types(user: dict = Depends(get_current_user)):
+    """Get all leave types configuration"""
+    return LEAVE_TYPES
+
+@api_router.get("/leave/balance", response_model=List[LeaveBalanceResponse])
+async def get_leave_balance(
+    employee_id: Optional[str] = None,
+    year: Optional[int] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get leave balance for an employee"""
+    if user['role'] not in ['super_admin', 'hr']:
+        employee_id = user.get('employee_id')
+    
+    if not employee_id:
+        return []
+    
+    if not year:
+        year = datetime.now().year
+    
+    balances = []
+    for tipe, config in LEAVE_TYPES.items():
+        if config['jatah_default'] is None:
+            continue
+        
+        # Count approved leaves for this type in the year
+        approved = await db.leave_requests.count_documents({
+            'employee_id': employee_id,
+            'tipe_cuti': tipe,
+            'status': 'approved',
+            'tanggal_mulai': {'$regex': f'^{year}'}
+        })
+        
+        # Sum the days
+        leaves = await db.leave_requests.find({
+            'employee_id': employee_id,
+            'tipe_cuti': tipe,
+            'status': 'approved',
+            'tanggal_mulai': {'$regex': f'^{year}'}
+        }, {'_id': 0}).to_list(100)
+        
+        terpakai = sum(l.get('jumlah_hari', 0) for l in leaves)
+        jatah = config['jatah_default']
+        
+        balances.append(LeaveBalanceResponse(
+            tipe_cuti=tipe,
+            nama=config['nama'],
+            jatah=jatah,
+            terpakai=terpakai,
+            sisa=max(0, jatah - terpakai) if config['potong_jatah'] else jatah
+        ))
+    
+    return balances
+
+@api_router.post("/leave/request", response_model=LeaveRequestResponse)
+async def create_leave_request(
+    data: LeaveRequestCreate,
+    user: dict = Depends(get_current_user)
+):
+    """Create a new leave request"""
+    if not user.get('employee_id'):
+        raise HTTPException(status_code=400, detail="Akun tidak terhubung dengan data karyawan")
+    
+    employee_id = user['employee_id']
+    employee = await db.employees.find_one({'id': employee_id}, {'_id': 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Data karyawan tidak ditemukan")
+    
+    # Validate leave type
+    if data.tipe_cuti not in LEAVE_TYPES:
+        raise HTTPException(status_code=400, detail="Tipe cuti tidak valid")
+    
+    config = LEAVE_TYPES[data.tipe_cuti]
+    
+    # Calculate days
+    jumlah_hari = calculate_working_days(data.tanggal_mulai, data.tanggal_selesai)
+    
+    if jumlah_hari <= 0:
+        raise HTTPException(status_code=400, detail="Tanggal tidak valid")
+    
+    if jumlah_hari > config['max_hari']:
+        raise HTTPException(status_code=400, detail=f"Maksimal {config['max_hari']} hari untuk {config['nama']}")
+    
+    # Check minimum days before
+    start_date = datetime.strptime(data.tanggal_mulai, '%Y-%m-%d')
+    days_before = (start_date - datetime.now()).days
+    if days_before < config['min_hari_pengajuan']:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Pengajuan {config['nama']} minimal {config['min_hari_pengajuan']} hari sebelumnya"
+        )
+    
+    # Check balance if applicable
+    if config['potong_jatah'] and config['jatah_default']:
+        year = int(data.tanggal_mulai[:4])
+        leaves = await db.leave_requests.find({
+            'employee_id': employee_id,
+            'tipe_cuti': data.tipe_cuti,
+            'status': 'approved',
+            'tanggal_mulai': {'$regex': f'^{year}'}
+        }, {'_id': 0}).to_list(100)
+        
+        terpakai = sum(l.get('jumlah_hari', 0) for l in leaves)
+        sisa = config['jatah_default'] - terpakai
+        
+        if jumlah_hari > sisa:
+            raise HTTPException(status_code=400, detail=f"Sisa cuti tidak mencukupi. Sisa: {sisa} hari")
+    
+    # Check attachment for sick leave
+    if config.get('butuh_lampiran') and not data.lampiran_url:
+        # Allow without attachment but note it
+        pass
+    
+    # Create request
+    request_id = str(uuid.uuid4())
+    leave_doc = {
+        'id': request_id,
+        'employee_id': employee_id,
+        'tipe_cuti': data.tipe_cuti,
+        'tanggal_mulai': data.tanggal_mulai,
+        'tanggal_selesai': data.tanggal_selesai,
+        'jumlah_hari': jumlah_hari,
+        'alasan': data.alasan,
+        'lampiran_url': data.lampiran_url,
+        'status': 'pending',
+        'approved_by': None,
+        'approved_at': None,
+        'rejected_reason': None,
+        'created_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.leave_requests.insert_one(leave_doc)
+    
+    return LeaveRequestResponse(
+        id=request_id,
+        employee_id=employee_id,
+        employee_nama=employee['nama_lengkap'],
+        tipe_cuti=data.tipe_cuti,
+        tipe_cuti_nama=config['nama'],
+        tanggal_mulai=data.tanggal_mulai,
+        tanggal_selesai=data.tanggal_selesai,
+        jumlah_hari=jumlah_hari,
+        alasan=data.alasan,
+        lampiran_url=data.lampiran_url,
+        status='pending',
+        approved_by=None,
+        approved_by_nama=None,
+        approved_at=None,
+        rejected_reason=None,
+        created_at=leave_doc['created_at']
+    )
+
+@api_router.get("/leave/requests", response_model=List[LeaveRequestResponse])
+async def get_leave_requests(
+    employee_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get leave requests"""
+    query = {}
+    
+    if user['role'] not in ['super_admin', 'hr', 'manager']:
+        employee_id = user.get('employee_id')
+    
+    if employee_id:
+        query['employee_id'] = employee_id
+    
+    if status:
+        query['status'] = status
+    
+    requests = await db.leave_requests.find(query, {'_id': 0}).sort('created_at', -1).to_list(100)
+    
+    result = []
+    for req in requests:
+        employee = await db.employees.find_one({'id': req['employee_id']}, {'_id': 0})
+        approver = None
+        if req.get('approved_by'):
+            approver = await db.users.find_one({'id': req['approved_by']}, {'_id': 0})
+        
+        config = LEAVE_TYPES.get(req['tipe_cuti'], {})
+        
+        result.append(LeaveRequestResponse(
+            id=req['id'],
+            employee_id=req['employee_id'],
+            employee_nama=employee['nama_lengkap'] if employee else None,
+            tipe_cuti=req['tipe_cuti'],
+            tipe_cuti_nama=config.get('nama', req['tipe_cuti']),
+            tanggal_mulai=req['tanggal_mulai'],
+            tanggal_selesai=req['tanggal_selesai'],
+            jumlah_hari=req['jumlah_hari'],
+            alasan=req['alasan'],
+            lampiran_url=req.get('lampiran_url'),
+            status=req['status'],
+            approved_by=req.get('approved_by'),
+            approved_by_nama=approver['nama_lengkap'] if approver else None,
+            approved_at=req.get('approved_at'),
+            rejected_reason=req.get('rejected_reason'),
+            created_at=req['created_at']
+        ))
+    
+    return result
+
+@api_router.get("/leave/pending", response_model=List[LeaveRequestResponse])
+async def get_pending_approvals(user: dict = Depends(get_current_user)):
+    """Get pending leave requests for approval"""
+    if user['role'] not in ['super_admin', 'hr', 'manager']:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    
+    requests = await db.leave_requests.find({'status': 'pending'}, {'_id': 0}).sort('created_at', -1).to_list(100)
+    
+    result = []
+    for req in requests:
+        config = LEAVE_TYPES.get(req['tipe_cuti'], {})
+        
+        # Check if user can approve this type
+        approval_level = config.get('approval_level', 'manager')
+        if approval_level == 'hr' and user['role'] not in ['super_admin', 'hr']:
+            continue
+        
+        employee = await db.employees.find_one({'id': req['employee_id']}, {'_id': 0})
+        
+        result.append(LeaveRequestResponse(
+            id=req['id'],
+            employee_id=req['employee_id'],
+            employee_nama=employee['nama_lengkap'] if employee else None,
+            tipe_cuti=req['tipe_cuti'],
+            tipe_cuti_nama=config.get('nama', req['tipe_cuti']),
+            tanggal_mulai=req['tanggal_mulai'],
+            tanggal_selesai=req['tanggal_selesai'],
+            jumlah_hari=req['jumlah_hari'],
+            alasan=req['alasan'],
+            lampiran_url=req.get('lampiran_url'),
+            status=req['status'],
+            approved_by=None,
+            approved_by_nama=None,
+            approved_at=None,
+            rejected_reason=None,
+            created_at=req['created_at']
+        ))
+    
+    return result
+
+@api_router.post("/leave/{request_id}/approve")
+async def approve_leave_request(
+    request_id: str,
+    data: LeaveApprovalAction,
+    user: dict = Depends(get_current_user)
+):
+    """Approve or reject a leave request"""
+    if user['role'] not in ['super_admin', 'hr', 'manager']:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    
+    leave_req = await db.leave_requests.find_one({'id': request_id}, {'_id': 0})
+    if not leave_req:
+        raise HTTPException(status_code=404, detail="Pengajuan tidak ditemukan")
+    
+    if leave_req['status'] != 'pending':
+        raise HTTPException(status_code=400, detail="Pengajuan sudah diproses")
+    
+    # Check approval level
+    config = LEAVE_TYPES.get(leave_req['tipe_cuti'], {})
+    approval_level = config.get('approval_level', 'manager')
+    if approval_level == 'hr' and user['role'] not in ['super_admin', 'hr']:
+        raise HTTPException(status_code=403, detail="Hanya HR yang dapat menyetujui cuti ini")
+    
+    if data.action == 'approve':
+        await db.leave_requests.update_one(
+            {'id': request_id},
+            {'$set': {
+                'status': 'approved',
+                'approved_by': user['id'],
+                'approved_at': datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        return {"message": "Pengajuan cuti disetujui"}
+    
+    elif data.action == 'reject':
+        if not data.alasan:
+            raise HTTPException(status_code=400, detail="Alasan penolakan wajib diisi")
+        
+        await db.leave_requests.update_one(
+            {'id': request_id},
+            {'$set': {
+                'status': 'rejected',
+                'approved_by': user['id'],
+                'approved_at': datetime.now(timezone.utc).isoformat(),
+                'rejected_reason': data.alasan
+            }}
+        )
+        return {"message": "Pengajuan cuti ditolak"}
+    
+    raise HTTPException(status_code=400, detail="Action tidak valid")
+
+@api_router.delete("/leave/{request_id}")
+async def cancel_leave_request(
+    request_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Cancel a pending leave request"""
+    leave_req = await db.leave_requests.find_one({'id': request_id}, {'_id': 0})
+    if not leave_req:
+        raise HTTPException(status_code=404, detail="Pengajuan tidak ditemukan")
+    
+    # Only owner or HR can cancel
+    if leave_req['employee_id'] != user.get('employee_id') and user['role'] not in ['super_admin', 'hr']:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    
+    if leave_req['status'] != 'pending':
+        raise HTTPException(status_code=400, detail="Hanya pengajuan pending yang dapat dibatalkan")
+    
+    await db.leave_requests.delete_one({'id': request_id})
+    return {"message": "Pengajuan cuti dibatalkan"}
+
+# ===================== OVERTIME ROUTES =====================
+
+@api_router.post("/overtime/request", response_model=OvertimeResponse)
+async def create_overtime_request(
+    data: OvertimeRequestCreate,
+    user: dict = Depends(get_current_user)
+):
+    """Create overtime request"""
+    if not user.get('employee_id'):
+        raise HTTPException(status_code=400, detail="Akun tidak terhubung dengan data karyawan")
+    
+    employee_id = user['employee_id']
+    employee = await db.employees.find_one({'id': employee_id}, {'_id': 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Data karyawan tidak ditemukan")
+    
+    # Calculate total hours
+    start = datetime.strptime(data.jam_mulai, '%H:%M')
+    end = datetime.strptime(data.jam_selesai, '%H:%M')
+    if end < start:
+        end += timedelta(days=1)
+    total_jam = (end - start).total_seconds() / 3600
+    
+    if total_jam <= 0:
+        raise HTTPException(status_code=400, detail="Jam tidak valid")
+    
+    request_id = str(uuid.uuid4())
+    overtime_doc = {
+        'id': request_id,
+        'employee_id': employee_id,
+        'tanggal': data.tanggal,
+        'jam_mulai': data.jam_mulai,
+        'jam_selesai': data.jam_selesai,
+        'total_jam': round(total_jam, 2),
+        'alasan': data.alasan,
+        'status': 'pending',
+        'approved_by': None,
+        'approved_at': None,
+        'created_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.overtime_requests.insert_one(overtime_doc)
+    
+    return OvertimeResponse(
+        id=request_id,
+        employee_id=employee_id,
+        employee_nama=employee['nama_lengkap'],
+        tanggal=data.tanggal,
+        jam_mulai=data.jam_mulai,
+        jam_selesai=data.jam_selesai,
+        total_jam=round(total_jam, 2),
+        alasan=data.alasan,
+        status='pending',
+        approved_by=None,
+        approved_by_nama=None,
+        approved_at=None,
+        created_at=overtime_doc['created_at']
+    )
+
+@api_router.get("/overtime/requests", response_model=List[OvertimeResponse])
+async def get_overtime_requests(
+    employee_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get overtime requests"""
+    query = {}
+    
+    if user['role'] not in ['super_admin', 'hr', 'manager']:
+        employee_id = user.get('employee_id')
+    
+    if employee_id:
+        query['employee_id'] = employee_id
+    
+    if status:
+        query['status'] = status
+    
+    requests = await db.overtime_requests.find(query, {'_id': 0}).sort('created_at', -1).to_list(100)
+    
+    result = []
+    for req in requests:
+        employee = await db.employees.find_one({'id': req['employee_id']}, {'_id': 0})
+        approver = None
+        if req.get('approved_by'):
+            approver = await db.users.find_one({'id': req['approved_by']}, {'_id': 0})
+        
+        result.append(OvertimeResponse(
+            id=req['id'],
+            employee_id=req['employee_id'],
+            employee_nama=employee['nama_lengkap'] if employee else None,
+            tanggal=req['tanggal'],
+            jam_mulai=req['jam_mulai'],
+            jam_selesai=req['jam_selesai'],
+            total_jam=req['total_jam'],
+            alasan=req['alasan'],
+            status=req['status'],
+            approved_by=req.get('approved_by'),
+            approved_by_nama=approver['nama_lengkap'] if approver else None,
+            approved_at=req.get('approved_at'),
+            created_at=req['created_at']
+        ))
+    
+    return result
+
+@api_router.post("/overtime/{request_id}/approve")
+async def approve_overtime_request(
+    request_id: str,
+    data: LeaveApprovalAction,
+    user: dict = Depends(get_current_user)
+):
+    """Approve or reject overtime request"""
+    if user['role'] not in ['super_admin', 'hr', 'manager']:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    
+    overtime_req = await db.overtime_requests.find_one({'id': request_id}, {'_id': 0})
+    if not overtime_req:
+        raise HTTPException(status_code=404, detail="Pengajuan tidak ditemukan")
+    
+    if overtime_req['status'] != 'pending':
+        raise HTTPException(status_code=400, detail="Pengajuan sudah diproses")
+    
+    if data.action == 'approve':
+        await db.overtime_requests.update_one(
+            {'id': request_id},
+            {'$set': {
+                'status': 'approved',
+                'approved_by': user['id'],
+                'approved_at': datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        return {"message": "Pengajuan lembur disetujui"}
+    
+    elif data.action == 'reject':
+        await db.overtime_requests.update_one(
+            {'id': request_id},
+            {'$set': {
+                'status': 'rejected',
+                'approved_by': user['id'],
+                'approved_at': datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        return {"message": "Pengajuan lembur ditolak"}
+    
+    raise HTTPException(status_code=400, detail="Action tidak valid")
+
+# ===================== SHIFT MANAGEMENT ROUTES =====================
+
+@api_router.post("/shifts", response_model=ShiftResponse)
+async def create_shift(
+    data: ShiftCreate,
+    user: dict = Depends(require_role(['super_admin', 'hr']))
+):
+    """Create a new shift"""
+    shift_id = str(uuid.uuid4())
+    shift_doc = {
+        'id': shift_id,
+        'nama': data.nama,
+        'jam_masuk': data.jam_masuk,
+        'jam_keluar': data.jam_keluar,
+        'warna': data.warna,
+        'created_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.shifts.insert_one(shift_doc)
+    
+    return ShiftResponse(
+        id=shift_id,
+        nama=data.nama,
+        jam_masuk=data.jam_masuk,
+        jam_keluar=data.jam_keluar,
+        warna=data.warna,
+        created_at=shift_doc['created_at']
+    )
+
+@api_router.get("/shifts", response_model=List[ShiftResponse])
+async def get_shifts(user: dict = Depends(get_current_user)):
+    """Get all shifts"""
+    shifts = await db.shifts.find({}, {'_id': 0}).to_list(100)
+    return [ShiftResponse(**s) for s in shifts]
+
+@api_router.put("/shifts/{shift_id}", response_model=ShiftResponse)
+async def update_shift(
+    shift_id: str,
+    data: ShiftCreate,
+    user: dict = Depends(require_role(['super_admin', 'hr']))
+):
+    """Update a shift"""
+    shift = await db.shifts.find_one({'id': shift_id})
+    if not shift:
+        raise HTTPException(status_code=404, detail="Shift tidak ditemukan")
+    
+    await db.shifts.update_one(
+        {'id': shift_id},
+        {'$set': {
+            'nama': data.nama,
+            'jam_masuk': data.jam_masuk,
+            'jam_keluar': data.jam_keluar,
+            'warna': data.warna
+        }}
+    )
+    
+    updated = await db.shifts.find_one({'id': shift_id}, {'_id': 0})
+    return ShiftResponse(**updated)
+
+@api_router.delete("/shifts/{shift_id}")
+async def delete_shift(
+    shift_id: str,
+    user: dict = Depends(require_role(['super_admin', 'hr']))
+):
+    """Delete a shift"""
+    shift = await db.shifts.find_one({'id': shift_id})
+    if not shift:
+        raise HTTPException(status_code=404, detail="Shift tidak ditemukan")
+    
+    # Check if shift is assigned
+    assigned = await db.shift_assignments.count_documents({'shift_id': shift_id})
+    if assigned > 0:
+        raise HTTPException(status_code=400, detail="Shift masih digunakan")
+    
+    await db.shifts.delete_one({'id': shift_id})
+    return {"message": "Shift berhasil dihapus"}
+
+@api_router.post("/shifts/assign", response_model=ShiftAssignmentResponse)
+async def assign_shift(
+    data: ShiftAssignmentCreate,
+    user: dict = Depends(require_role(['super_admin', 'hr']))
+):
+    """Assign shift to employee"""
+    employee = await db.employees.find_one({'id': data.employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Karyawan tidak ditemukan")
+    
+    shift = await db.shifts.find_one({'id': data.shift_id})
+    if not shift:
+        raise HTTPException(status_code=404, detail="Shift tidak ditemukan")
+    
+    # Remove existing assignment
+    await db.shift_assignments.delete_many({'employee_id': data.employee_id})
+    
+    assignment_id = str(uuid.uuid4())
+    assignment_doc = {
+        'id': assignment_id,
+        'employee_id': data.employee_id,
+        'shift_id': data.shift_id,
+        'tanggal_mulai': data.tanggal_mulai,
+        'tanggal_selesai': data.tanggal_selesai
+    }
+    
+    await db.shift_assignments.insert_one(assignment_doc)
+    
+    return ShiftAssignmentResponse(
+        id=assignment_id,
+        employee_id=data.employee_id,
+        employee_nama=employee['nama_lengkap'],
+        shift_id=data.shift_id,
+        shift_nama=shift['nama'],
+        shift_jam=f"{shift['jam_masuk']} - {shift['jam_keluar']}",
+        tanggal_mulai=data.tanggal_mulai,
+        tanggal_selesai=data.tanggal_selesai
+    )
+
+@api_router.get("/shifts/assignments", response_model=List[ShiftAssignmentResponse])
+async def get_shift_assignments(
+    department_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get shift assignments"""
+    assignments = await db.shift_assignments.find({}, {'_id': 0}).to_list(1000)
+    
+    result = []
+    for a in assignments:
+        employee = await db.employees.find_one({'id': a['employee_id']}, {'_id': 0})
+        if department_id and employee and employee.get('department_id') != department_id:
+            continue
+        
+        shift = await db.shifts.find_one({'id': a['shift_id']}, {'_id': 0})
+        
+        result.append(ShiftAssignmentResponse(
+            id=a['id'],
+            employee_id=a['employee_id'],
+            employee_nama=employee['nama_lengkap'] if employee else None,
+            shift_id=a['shift_id'],
+            shift_nama=shift['nama'] if shift else None,
+            shift_jam=f"{shift['jam_masuk']} - {shift['jam_keluar']}" if shift else None,
+            tanggal_mulai=a['tanggal_mulai'],
+            tanggal_selesai=a.get('tanggal_selesai')
+        ))
+    
+    return result
+
+@api_router.get("/calendar/events")
+async def get_calendar_events(
+    start_date: str,
+    end_date: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get calendar events (leaves, shifts) for date range"""
+    events = []
+    
+    # Get approved leaves
+    leaves = await db.leave_requests.find({
+        'status': 'approved',
+        '$or': [
+            {'tanggal_mulai': {'$gte': start_date, '$lte': end_date}},
+            {'tanggal_selesai': {'$gte': start_date, '$lte': end_date}}
+        ]
+    }, {'_id': 0}).to_list(100)
+    
+    for leave in leaves:
+        employee = await db.employees.find_one({'id': leave['employee_id']}, {'_id': 0})
+        config = LEAVE_TYPES.get(leave['tipe_cuti'], {})
+        events.append({
+            'type': 'leave',
+            'id': leave['id'],
+            'title': f"{employee['nama_lengkap'] if employee else 'Unknown'} - {config.get('nama', leave['tipe_cuti'])}",
+            'start': leave['tanggal_mulai'],
+            'end': leave['tanggal_selesai'],
+            'color': '#F59E0B'  # Amber for leave
+        })
+    
+    # Get approved overtimes
+    overtimes = await db.overtime_requests.find({
+        'status': 'approved',
+        'tanggal': {'$gte': start_date, '$lte': end_date}
+    }, {'_id': 0}).to_list(100)
+    
+    for ot in overtimes:
+        employee = await db.employees.find_one({'id': ot['employee_id']}, {'_id': 0})
+        events.append({
+            'type': 'overtime',
+            'id': ot['id'],
+            'title': f"{employee['nama_lengkap'] if employee else 'Unknown'} - Lembur {ot['total_jam']}jam",
+            'start': ot['tanggal'],
+            'end': ot['tanggal'],
+            'color': '#8B5CF6'  # Purple for overtime
+        })
+    
+    return events
+
 # ===================== SEED DATA =====================
 
 @api_router.post("/seed")
