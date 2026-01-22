@@ -416,6 +416,13 @@ def main():
         ("Employee Detail", tester.test_employee_detail),
         ("Users Management", tester.test_users_management),
         ("Auth Me", tester.test_auth_me),
+        ("Attendance Settings", tester.test_attendance_settings),
+        ("Today's Attendance", tester.test_attendance_today),
+        ("Attendance History", tester.test_attendance_history),
+        ("Attendance Stats", tester.test_attendance_stats),
+        ("Face Check", tester.test_face_check),
+        ("Face Register", tester.test_face_register),
+        ("Attendance Clock In", tester.test_attendance_clock_in),
     ]
     
     passed_tests = []
