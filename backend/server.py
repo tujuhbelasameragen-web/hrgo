@@ -761,6 +761,486 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
         karyawan_baru_bulan_ini=karyawan_baru
     )
 
+# ===================== ATTENDANCE MODELS =====================
+
+class OfficeLocation(BaseModel):
+    id: str
+    nama: str
+    latitude: float
+    longitude: float
+    radius: int = 100  # in meters
+    is_default: bool = False
+
+class AttendanceCreate(BaseModel):
+    tipe: str  # clock_in, clock_out
+    mode: str  # wfo, wfh, client_visit
+    latitude: float
+    longitude: float
+    foto_url: str  # base64 or URL of selfie
+    catatan: Optional[str] = None
+    alamat_client: Optional[str] = None  # for client visit
+
+class AttendanceResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    employee_id: str
+    employee_nama: Optional[str] = None
+    tanggal: str
+    clock_in: Optional[str] = None
+    clock_in_foto: Optional[str] = None
+    clock_in_latitude: Optional[float] = None
+    clock_in_longitude: Optional[float] = None
+    clock_in_mode: Optional[str] = None
+    clock_out: Optional[str] = None
+    clock_out_foto: Optional[str] = None
+    clock_out_latitude: Optional[float] = None
+    clock_out_longitude: Optional[float] = None
+    clock_out_mode: Optional[str] = None
+    total_jam: Optional[float] = None
+    status: str  # hadir, terlambat, alpha, izin
+    catatan: Optional[str] = None
+
+class FaceDataCreate(BaseModel):
+    face_descriptor: List[float]  # 128-dimensional face descriptor
+
+class AttendanceStats(BaseModel):
+    total_hari_kerja: int
+    total_hadir: int
+    total_terlambat: int
+    total_alpha: int
+    persentase_kehadiran: float
+
+# Office location settings
+OFFICE_LOCATIONS = [
+    {
+        'id': 'office-main',
+        'nama': 'Kantor Pusat',
+        'latitude': -6.161777101062483,
+        'longitude': 106.87519933469652,
+        'radius': 100,
+        'is_default': True
+    }
+]
+
+WORK_HOURS = {
+    'start': '09:00',
+    'end': '18:00',
+    'late_tolerance_minutes': 15
+}
+
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance between two points in meters using Haversine formula"""
+    from math import radians, cos, sin, asin, sqrt
+    
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    r = 6371000  # Earth radius in meters
+    return c * r
+
+def is_within_office(lat: float, lon: float) -> tuple:
+    """Check if coordinates are within any office location"""
+    for office in OFFICE_LOCATIONS:
+        distance = calculate_distance(lat, lon, office['latitude'], office['longitude'])
+        if distance <= office['radius']:
+            return True, office['nama'], distance
+    return False, None, None
+
+def is_late(clock_in_time: datetime) -> bool:
+    """Check if clock in time is late"""
+    start_hour, start_minute = map(int, WORK_HOURS['start'].split(':'))
+    tolerance = WORK_HOURS['late_tolerance_minutes']
+    
+    deadline = clock_in_time.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+    deadline += timedelta(minutes=tolerance)
+    
+    return clock_in_time > deadline
+
+# ===================== ATTENDANCE ROUTES =====================
+
+@api_router.get("/attendance/settings")
+async def get_attendance_settings(user: dict = Depends(get_current_user)):
+    """Get attendance settings including office locations and work hours"""
+    return {
+        "office_locations": OFFICE_LOCATIONS,
+        "work_hours": WORK_HOURS
+    }
+
+@api_router.post("/attendance/clock", response_model=AttendanceResponse)
+async def clock_attendance(
+    data: AttendanceCreate,
+    user: dict = Depends(get_current_user)
+):
+    """Clock in or clock out"""
+    if not user.get('employee_id'):
+        raise HTTPException(status_code=400, detail="Akun tidak terhubung dengan data karyawan")
+    
+    employee_id = user['employee_id']
+    now = datetime.now(timezone.utc)
+    today = now.strftime('%Y-%m-%d')
+    
+    # Get employee data
+    employee = await db.employees.find_one({'id': employee_id}, {'_id': 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Data karyawan tidak ditemukan")
+    
+    # Validate mode
+    if data.mode not in ['wfo', 'wfh', 'client_visit']:
+        raise HTTPException(status_code=400, detail="Mode tidak valid")
+    
+    # For WFO, validate location
+    if data.mode == 'wfo':
+        within_office, office_name, distance = is_within_office(data.latitude, data.longitude)
+        if not within_office:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Lokasi Anda tidak dalam radius kantor. Jarak: {int(distance) if distance else 'unknown'}m"
+            )
+    
+    # For client visit, require address
+    if data.mode == 'client_visit' and not data.alamat_client:
+        raise HTTPException(status_code=400, detail="Alamat client wajib diisi untuk mode Client Visit")
+    
+    # Get or create today's attendance record
+    attendance = await db.attendance.find_one({
+        'employee_id': employee_id,
+        'tanggal': today
+    }, {'_id': 0})
+    
+    if data.tipe == 'clock_in':
+        if attendance and attendance.get('clock_in'):
+            raise HTTPException(status_code=400, detail="Anda sudah clock in hari ini")
+        
+        # Determine status
+        status = 'terlambat' if is_late(now) else 'hadir'
+        
+        if attendance:
+            # Update existing record
+            await db.attendance.update_one(
+                {'id': attendance['id']},
+                {'$set': {
+                    'clock_in': now.isoformat(),
+                    'clock_in_foto': data.foto_url,
+                    'clock_in_latitude': data.latitude,
+                    'clock_in_longitude': data.longitude,
+                    'clock_in_mode': data.mode,
+                    'status': status,
+                    'catatan': data.catatan or data.alamat_client
+                }}
+            )
+            attendance_id = attendance['id']
+        else:
+            # Create new record
+            attendance_id = str(uuid.uuid4())
+            await db.attendance.insert_one({
+                'id': attendance_id,
+                'employee_id': employee_id,
+                'tanggal': today,
+                'clock_in': now.isoformat(),
+                'clock_in_foto': data.foto_url,
+                'clock_in_latitude': data.latitude,
+                'clock_in_longitude': data.longitude,
+                'clock_in_mode': data.mode,
+                'clock_out': None,
+                'clock_out_foto': None,
+                'clock_out_latitude': None,
+                'clock_out_longitude': None,
+                'clock_out_mode': None,
+                'total_jam': None,
+                'status': status,
+                'catatan': data.catatan or data.alamat_client
+            })
+    
+    elif data.tipe == 'clock_out':
+        if not attendance or not attendance.get('clock_in'):
+            raise HTTPException(status_code=400, detail="Anda belum clock in hari ini")
+        
+        if attendance.get('clock_out'):
+            raise HTTPException(status_code=400, detail="Anda sudah clock out hari ini")
+        
+        # Calculate total hours
+        clock_in_time = datetime.fromisoformat(attendance['clock_in'])
+        total_hours = (now - clock_in_time).total_seconds() / 3600
+        
+        await db.attendance.update_one(
+            {'id': attendance['id']},
+            {'$set': {
+                'clock_out': now.isoformat(),
+                'clock_out_foto': data.foto_url,
+                'clock_out_latitude': data.latitude,
+                'clock_out_longitude': data.longitude,
+                'clock_out_mode': data.mode,
+                'total_jam': round(total_hours, 2)
+            }}
+        )
+        attendance_id = attendance['id']
+    
+    else:
+        raise HTTPException(status_code=400, detail="Tipe tidak valid (clock_in/clock_out)")
+    
+    # Return updated attendance
+    updated = await db.attendance.find_one({'id': attendance_id}, {'_id': 0})
+    return AttendanceResponse(
+        id=updated['id'],
+        employee_id=updated['employee_id'],
+        employee_nama=employee['nama_lengkap'],
+        tanggal=updated['tanggal'],
+        clock_in=updated.get('clock_in'),
+        clock_in_foto=updated.get('clock_in_foto'),
+        clock_in_latitude=updated.get('clock_in_latitude'),
+        clock_in_longitude=updated.get('clock_in_longitude'),
+        clock_in_mode=updated.get('clock_in_mode'),
+        clock_out=updated.get('clock_out'),
+        clock_out_foto=updated.get('clock_out_foto'),
+        clock_out_latitude=updated.get('clock_out_latitude'),
+        clock_out_longitude=updated.get('clock_out_longitude'),
+        clock_out_mode=updated.get('clock_out_mode'),
+        total_jam=updated.get('total_jam'),
+        status=updated['status'],
+        catatan=updated.get('catatan')
+    )
+
+@api_router.get("/attendance/today", response_model=Optional[AttendanceResponse])
+async def get_today_attendance(user: dict = Depends(get_current_user)):
+    """Get today's attendance for current user"""
+    if not user.get('employee_id'):
+        return None
+    
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    attendance = await db.attendance.find_one({
+        'employee_id': user['employee_id'],
+        'tanggal': today
+    }, {'_id': 0})
+    
+    if not attendance:
+        return None
+    
+    employee = await db.employees.find_one({'id': user['employee_id']}, {'_id': 0})
+    
+    return AttendanceResponse(
+        id=attendance['id'],
+        employee_id=attendance['employee_id'],
+        employee_nama=employee['nama_lengkap'] if employee else None,
+        tanggal=attendance['tanggal'],
+        clock_in=attendance.get('clock_in'),
+        clock_in_foto=attendance.get('clock_in_foto'),
+        clock_in_latitude=attendance.get('clock_in_latitude'),
+        clock_in_longitude=attendance.get('clock_in_longitude'),
+        clock_in_mode=attendance.get('clock_in_mode'),
+        clock_out=attendance.get('clock_out'),
+        clock_out_foto=attendance.get('clock_out_foto'),
+        clock_out_latitude=attendance.get('clock_out_latitude'),
+        clock_out_longitude=attendance.get('clock_out_longitude'),
+        clock_out_mode=attendance.get('clock_out_mode'),
+        total_jam=attendance.get('total_jam'),
+        status=attendance['status'],
+        catatan=attendance.get('catatan')
+    )
+
+@api_router.get("/attendance/history", response_model=List[AttendanceResponse])
+async def get_attendance_history(
+    employee_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get attendance history"""
+    # If not HR/Admin, can only see own history
+    if user['role'] not in ['super_admin', 'hr']:
+        employee_id = user.get('employee_id')
+        if not employee_id:
+            return []
+    
+    query = {}
+    if employee_id:
+        query['employee_id'] = employee_id
+    
+    if start_date:
+        query['tanggal'] = {'$gte': start_date}
+    if end_date:
+        if 'tanggal' in query:
+            query['tanggal']['$lte'] = end_date
+        else:
+            query['tanggal'] = {'$lte': end_date}
+    
+    attendance_list = await db.attendance.find(query, {'_id': 0}).sort('tanggal', -1).to_list(100)
+    
+    result = []
+    for att in attendance_list:
+        employee = await db.employees.find_one({'id': att['employee_id']}, {'_id': 0})
+        result.append(AttendanceResponse(
+            id=att['id'],
+            employee_id=att['employee_id'],
+            employee_nama=employee['nama_lengkap'] if employee else None,
+            tanggal=att['tanggal'],
+            clock_in=att.get('clock_in'),
+            clock_in_foto=att.get('clock_in_foto'),
+            clock_in_latitude=att.get('clock_in_latitude'),
+            clock_in_longitude=att.get('clock_in_longitude'),
+            clock_in_mode=att.get('clock_in_mode'),
+            clock_out=att.get('clock_out'),
+            clock_out_foto=att.get('clock_out_foto'),
+            clock_out_latitude=att.get('clock_out_latitude'),
+            clock_out_longitude=att.get('clock_out_longitude'),
+            clock_out_mode=att.get('clock_out_mode'),
+            total_jam=att.get('total_jam'),
+            status=att['status'],
+            catatan=att.get('catatan')
+        ))
+    
+    return result
+
+@api_router.get("/attendance/stats", response_model=AttendanceStats)
+async def get_attendance_stats(
+    employee_id: Optional[str] = None,
+    month: Optional[str] = None,  # Format: YYYY-MM
+    user: dict = Depends(get_current_user)
+):
+    """Get attendance statistics"""
+    if user['role'] not in ['super_admin', 'hr']:
+        employee_id = user.get('employee_id')
+        if not employee_id:
+            return AttendanceStats(
+                total_hari_kerja=0,
+                total_hadir=0,
+                total_terlambat=0,
+                total_alpha=0,
+                persentase_kehadiran=0
+            )
+    
+    # Default to current month
+    if not month:
+        month = datetime.now(timezone.utc).strftime('%Y-%m')
+    
+    query = {'tanggal': {'$regex': f'^{month}'}}
+    if employee_id:
+        query['employee_id'] = employee_id
+    
+    attendance_list = await db.attendance.find(query, {'_id': 0}).to_list(100)
+    
+    total_hadir = sum(1 for a in attendance_list if a['status'] == 'hadir')
+    total_terlambat = sum(1 for a in attendance_list if a['status'] == 'terlambat')
+    total_alpha = sum(1 for a in attendance_list if a['status'] == 'alpha')
+    
+    # Calculate working days in month (Mon-Fri)
+    year, mon = map(int, month.split('-'))
+    from calendar import monthrange
+    _, days_in_month = monthrange(year, mon)
+    total_hari_kerja = sum(1 for d in range(1, days_in_month + 1) 
+                          if datetime(year, mon, d).weekday() < 5)
+    
+    total_kehadiran = total_hadir + total_terlambat
+    persentase = (total_kehadiran / total_hari_kerja * 100) if total_hari_kerja > 0 else 0
+    
+    return AttendanceStats(
+        total_hari_kerja=total_hari_kerja,
+        total_hadir=total_hadir,
+        total_terlambat=total_terlambat,
+        total_alpha=total_alpha,
+        persentase_kehadiran=round(persentase, 1)
+    )
+
+@api_router.get("/attendance/team", response_model=List[AttendanceResponse])
+async def get_team_attendance(
+    tanggal: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get team attendance for today (HR/Manager view)"""
+    if user['role'] not in ['super_admin', 'hr', 'manager']:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    
+    if not tanggal:
+        tanggal = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    
+    attendance_list = await db.attendance.find({'tanggal': tanggal}, {'_id': 0}).to_list(1000)
+    
+    result = []
+    for att in attendance_list:
+        employee = await db.employees.find_one({'id': att['employee_id']}, {'_id': 0})
+        result.append(AttendanceResponse(
+            id=att['id'],
+            employee_id=att['employee_id'],
+            employee_nama=employee['nama_lengkap'] if employee else None,
+            tanggal=att['tanggal'],
+            clock_in=att.get('clock_in'),
+            clock_in_foto=att.get('clock_in_foto'),
+            clock_in_latitude=att.get('clock_in_latitude'),
+            clock_in_longitude=att.get('clock_in_longitude'),
+            clock_in_mode=att.get('clock_in_mode'),
+            clock_out=att.get('clock_out'),
+            clock_out_foto=att.get('clock_out_foto'),
+            clock_out_latitude=att.get('clock_out_latitude'),
+            clock_out_longitude=att.get('clock_out_longitude'),
+            clock_out_mode=att.get('clock_out_mode'),
+            total_jam=att.get('total_jam'),
+            status=att['status'],
+            catatan=att.get('catatan')
+        ))
+    
+    return result
+
+# ===================== FACE REGISTRATION =====================
+
+@api_router.post("/face/register")
+async def register_face(
+    data: FaceDataCreate,
+    user: dict = Depends(get_current_user)
+):
+    """Register face descriptor for an employee"""
+    if not user.get('employee_id'):
+        raise HTTPException(status_code=400, detail="Akun tidak terhubung dengan data karyawan")
+    
+    employee_id = user['employee_id']
+    
+    # Validate face descriptor length (should be 128 for face-api.js)
+    if len(data.face_descriptor) != 128:
+        raise HTTPException(status_code=400, detail="Invalid face descriptor")
+    
+    # Save or update face data
+    existing = await db.face_data.find_one({'employee_id': employee_id})
+    
+    if existing:
+        await db.face_data.update_one(
+            {'employee_id': employee_id},
+            {'$set': {
+                'face_descriptor': data.face_descriptor,
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }}
+        )
+    else:
+        await db.face_data.insert_one({
+            'id': str(uuid.uuid4()),
+            'employee_id': employee_id,
+            'face_descriptor': data.face_descriptor,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'updated_at': datetime.now(timezone.utc).isoformat()
+        })
+    
+    return {"message": "Wajah berhasil didaftarkan"}
+
+@api_router.get("/face/check")
+async def check_face_registered(user: dict = Depends(get_current_user)):
+    """Check if user has registered face"""
+    if not user.get('employee_id'):
+        return {"registered": False}
+    
+    face_data = await db.face_data.find_one({'employee_id': user['employee_id']})
+    return {"registered": face_data is not None}
+
+@api_router.get("/face/descriptor")
+async def get_face_descriptor(user: dict = Depends(get_current_user)):
+    """Get user's face descriptor for verification"""
+    if not user.get('employee_id'):
+        raise HTTPException(status_code=400, detail="Akun tidak terhubung dengan data karyawan")
+    
+    face_data = await db.face_data.find_one({'employee_id': user['employee_id']}, {'_id': 0})
+    if not face_data:
+        raise HTTPException(status_code=404, detail="Wajah belum didaftarkan")
+    
+    return {"face_descriptor": face_data['face_descriptor']}
+
 # ===================== SEED DATA =====================
 
 @api_router.post("/seed")
