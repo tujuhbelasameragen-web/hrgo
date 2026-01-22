@@ -262,6 +262,142 @@ class HaergoAPITester:
             return True
         return False
 
+    def test_attendance_settings(self):
+        """Test attendance settings endpoint"""
+        success, response = self.run_test(
+            "Attendance Settings",
+            "GET",
+            "attendance/settings",
+            200
+        )
+        if success:
+            settings = response
+            print(f"   Office locations: {len(settings.get('office_locations', []))}")
+            print(f"   Work hours: {settings.get('work_hours', {}).get('start')} - {settings.get('work_hours', {}).get('end')}")
+            
+            # Verify expected office location
+            office_locations = settings.get('office_locations', [])
+            if len(office_locations) > 0:
+                main_office = office_locations[0]
+                expected_lat = -6.161777101062483
+                expected_lon = 106.87519933469652
+                
+                if (abs(main_office.get('latitude', 0) - expected_lat) < 0.001 and 
+                    abs(main_office.get('longitude', 0) - expected_lon) < 0.001):
+                    print("   ✅ Office location coordinates correct")
+                    return True
+                else:
+                    print(f"   ⚠️  Office coordinates mismatch")
+                    return False
+            else:
+                print("   ⚠️  No office locations found")
+                return False
+        return False
+
+    def test_attendance_today(self):
+        """Test today's attendance endpoint"""
+        success, response = self.run_test(
+            "Today's Attendance",
+            "GET",
+            "attendance/today",
+            200
+        )
+        if success:
+            # Response can be null if no attendance today
+            print(f"   Today's attendance: {response if response else 'No attendance today'}")
+            return True
+        return False
+
+    def test_attendance_history(self):
+        """Test attendance history endpoint"""
+        success, response = self.run_test(
+            "Attendance History",
+            "GET",
+            "attendance/history",
+            200
+        )
+        if success:
+            history = response
+            print(f"   Found {len(history)} attendance records")
+            return True
+        return False
+
+    def test_attendance_stats(self):
+        """Test attendance statistics endpoint"""
+        success, response = self.run_test(
+            "Attendance Stats",
+            "GET",
+            "attendance/stats",
+            200
+        )
+        if success:
+            stats = response
+            print(f"   Total hari kerja: {stats.get('total_hari_kerja', 0)}")
+            print(f"   Total hadir: {stats.get('total_hadir', 0)}")
+            print(f"   Total terlambat: {stats.get('total_terlambat', 0)}")
+            print(f"   Persentase kehadiran: {stats.get('persentase_kehadiran', 0)}%")
+            return True
+        return False
+
+    def test_face_check(self):
+        """Test face registration check endpoint"""
+        success, response = self.run_test(
+            "Face Registration Check",
+            "GET",
+            "face/check",
+            200
+        )
+        if success:
+            registered = response.get('registered', False)
+            print(f"   Face registered: {registered}")
+            return True
+        return False
+
+    def test_face_register(self):
+        """Test face registration endpoint"""
+        # Create a dummy 128-dimensional face descriptor
+        dummy_descriptor = [0.1] * 128
+        
+        success, response = self.run_test(
+            "Face Registration",
+            "POST",
+            "face/register",
+            200,
+            data={"face_descriptor": dummy_descriptor}
+        )
+        if success:
+            message = response.get('message', '')
+            print(f"   Registration result: {message}")
+            return True
+        return False
+
+    def test_attendance_clock_in(self):
+        """Test attendance clock in endpoint"""
+        # Test data for clock in
+        clock_data = {
+            "tipe": "clock_in",
+            "mode": "wfh",  # Use WFH to avoid location validation
+            "latitude": -6.161777,
+            "longitude": 106.875199,
+            "foto_url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+            "catatan": "Test clock in",
+            "alamat_client": None
+        }
+        
+        success, response = self.run_test(
+            "Attendance Clock In",
+            "POST",
+            "attendance/clock",
+            200,
+            data=clock_data
+        )
+        if success:
+            attendance = response
+            print(f"   Clock in time: {attendance.get('clock_in', 'N/A')}")
+            print(f"   Status: {attendance.get('status', 'N/A')}")
+            return True
+        return False
+
 def main():
     print("🚀 Starting Haergo HR System API Tests")
     print("=" * 50)
